@@ -1,3 +1,6 @@
+// Export the SDK
+export * from './sdk/index.js';
+
 console.log("Hello from TypeScript! 🚀");
 
 // Simple function to demonstrate TypeScript

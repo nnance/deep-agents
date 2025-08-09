@@ -1,6 +1,7 @@
 {
   "name": "deep-agents",
   "version": "1.0.0",
+  "type": "module",
   "description": "A TypeScript Node.js project",
   "main": "dist/index.js",
   "scripts": {
