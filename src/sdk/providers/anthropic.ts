@@ -1,4 +1,12 @@
 import type { LLMProvider, TextGenerationOptions, TextGenerationResponse } from '../interfaces/providers.js';
+import { 
+	MessageResponseSchema, 
+	StreamChunkSchema, 
+	ModelsResponseSchema,
+	type MessageResponse,
+	type StreamChunk,
+	type ModelsResponse
+} from './anthropic-schemas.js';
 
 export interface AnthropicConfig {
 	apiKey: string;
@@ -42,35 +50,47 @@ const createRequestBody = (options: TextGenerationOptions) => {
 
 // Pure function to handle non-streaming response
 const parseResponse = async (response: Response): Promise<TextGenerationResponse> => {
-	const data = await response.json();
+	const rawData = await response.json();
+	
+	// Validate the response using Zod schema
+	const validationResult = MessageResponseSchema.safeParse(rawData);
+	if (!validationResult.success) {
+		throw new Error(`Invalid Anthropic API response format: ${validationResult.error.message}`);
+	}
+	
+	const data: MessageResponse = validationResult.data;
+	const promptTokens = data.usage?.input_tokens ?? 0;
+	const completionTokens = data.usage?.output_tokens ?? 0;
 	
 	return {
 		text: data.content?.[0]?.text || '',
 		usage: {
-			promptTokens: data.usage?.input_tokens,
-			completionTokens: data.usage?.output_tokens,
-			totalTokens: (data.usage?.input_tokens || 0) + (data.usage?.output_tokens || 0)
+			promptTokens,
+			completionTokens,
+			totalTokens: promptTokens + completionTokens
 		}
 	};
 };
 
-// Higher-order function for parsing JSON lines
-const parseJsonLines = (lines: string[]) => 
+// Higher-order function for parsing JSON lines with validation
+const parseJsonLines = (lines: string[]): StreamChunk[] => 
 	lines
 		.filter(line => line.trim().startsWith('data: '))
 		.map(line => line.replace('data: ', '').trim())
 		.filter(line => line !== '[DONE]')
 		.map(line => {
 			try {
-				return JSON.parse(line);
+				const parsed = JSON.parse(line);
+				const validationResult = StreamChunkSchema.safeParse(parsed);
+				return validationResult.success ? validationResult.data : null;
 			} catch {
 				return null;
 			}
 		})
-		.filter(Boolean);
+		.filter((chunk): chunk is StreamChunk => chunk !== null);
 
 // Pure function to accumulate streaming response data
-const accumulateStreamData = (chunks: any[]) => 
+const accumulateStreamData = (chunks: StreamChunk[]) => 
 	chunks.reduce(
 		(acc, data) => {
 			if (data.type === 'content_block_delta' && data.delta?.text) {
@@ -99,7 +119,7 @@ const parseStreamResponse = async (response: Response): Promise<TextGenerationRe
 
 	const reader = response.body.getReader();
 	const decoder = new TextDecoder();
-	const chunks: any[] = [];
+	const chunks: StreamChunk[] = [];
 
 	try {
 		let done = false;
@@ -163,14 +183,17 @@ const sendMessages = async (request: (endpoint: string, options?: RequestInit) =
 	};
 
 
-// Pure function to extract model names from API response
-const extractModelNames = (modelsData: any): string[] => {
-	if (!modelsData?.data || !Array.isArray(modelsData.data)) {
+// Pure function to extract model names from API response with validation
+const extractModelNames = (rawModelsData: unknown): string[] => {
+	const validationResult = ModelsResponseSchema.safeParse(rawModelsData);
+	
+	if (!validationResult.success || !validationResult.data.data) {
 		// Fallback to known models if API response is invalid
 		return knownModels;
 	}
 	
-	return modelsData.data.map((model: any) => model.id).filter(Boolean);
+	const modelsData: ModelsResponse = validationResult.data;
+	return modelsData.data?.map(model => model.id).filter(Boolean) || knownModels;
 };
 
 // Function to fetch available models from Anthropic API
