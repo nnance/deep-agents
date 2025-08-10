@@ -5,6 +5,12 @@ export type {
 	TextGenerationResponse 
 } from './interfaces/providers.js';
 
+export type {
+	LLMProviderWithMessages,
+	ChatCompletionOptions,
+	Message
+} from './interfaces/messages.js';
+
 // Providers
 export { 
 	createOllamaProvider 

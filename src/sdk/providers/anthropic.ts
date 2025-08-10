@@ -1,4 +1,5 @@
 import type { LLMProvider, TextGenerationOptions, TextGenerationResponse } from '../interfaces/providers.js';
+import type { LLMProviderWithMessages, ChatCompletionOptions, Message } from '../interfaces/messages.js';
 import { 
 	MessageResponseSchema, 
 	StreamChunkSchema, 
@@ -14,7 +15,7 @@ export interface AnthropicConfig {
 	version?: string;
 }
 
-export interface AnthropicProvider extends LLMProvider {
+export interface AnthropicProvider extends LLMProviderWithMessages {
 	listModels(): Promise<string[]>;
 	isServiceAvailable(): Promise<boolean>;
 }
@@ -39,6 +40,32 @@ const createRequestBody = (options: TextGenerationOptions) => {
 		model,
 		max_tokens: maxTokens,
 		messages,
+		stream
+	};
+
+	// Compose the request body using functional approach
+	return systemPrompt 
+		? { ...requestBody, system: systemPrompt }
+		: requestBody;
+};
+
+// Pure function to create request body for chat completion
+const createChatRequestBody = (options: ChatCompletionOptions) => {
+	const { model, maxTokens = 4096, stream = false, systemPrompt, messages, prompt } = options;
+	
+	// If messages are provided, use them; otherwise convert prompt to a message
+	const chatMessages = messages || (prompt ? [{ role: 'user' as const, content: prompt }] : []);
+	
+	// Convert our Message format to Anthropic's format
+	const anthropicMessages = chatMessages.map(msg => ({
+		role: msg.role === 'assistant' ? 'assistant' : 'user',
+		content: msg.content
+	}));
+
+	const requestBody: Record<string, any> = {
+		model,
+		max_tokens: maxTokens,
+		messages: anthropicMessages,
 		stream
 	};
 
@@ -173,7 +200,7 @@ const makeRequest = (baseUrl: string, apiKey: string, version: string) =>
 
 // Function to send messages to the Anthropic API
 // Anthropic API documentation: https://docs.anthropic.com/en/api/messages.md
-const sendMessages = async (request: (endpoint: string, options?: RequestInit) => Promise<Response>, requestBody: Record<string, any>, options: TextGenerationOptions): Promise<TextGenerationResponse> => {
+const sendMessages = async (request: (endpoint: string, options?: RequestInit) => Promise<Response>, requestBody: Record<string, any>, options: { stream?: boolean }): Promise<TextGenerationResponse> => {
 			const response = await request('/v1/messages', {
 				method: 'POST',
 				body: JSON.stringify(requestBody),
@@ -241,6 +268,14 @@ export const createAnthropicProvider = (config: AnthropicConfig): AnthropicProvi
 		'Failed to generate text with Anthropic'
 	);
 
+	const generateChatCompletion = withErrorHandling(
+		async (options: ChatCompletionOptions): Promise<TextGenerationResponse> => {
+			const requestBody = createChatRequestBody(options);
+			return sendMessages(request, requestBody, options);
+		},
+		'Failed to generate chat completion with Anthropic'
+	);
+
 	const listModels = withErrorHandling(
 		async (): Promise<string[]> => {
 			return await getModels();
@@ -267,6 +302,7 @@ export const createAnthropicProvider = (config: AnthropicConfig): AnthropicProvi
 
 	return {
 		generateText,
+		generateChatCompletion,
 		listModels,
 		isServiceAvailable
 	};
