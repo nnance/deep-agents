@@ -1,4 +1,7 @@
 import { createOllamaProvider, createAnthropicProvider, type LLMProvider } from '../sdk/index.js';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 // Test utility functions
 const createTestOptions = (model: string) => ({

@@ -1,13 +1,15 @@
 import { createAnthropicProvider } from '../sdk/index.js';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 async function functionalExample() {
 	console.log('=== Functional Programming Style with Anthropic ===');
 	
 	// Create an Anthropic provider using functional approach
-    // TODO: Use dotenv to retrieve environment variables
 	const anthropic = createAnthropicProvider({
-		apiKey: process.env.ANTHROPIC_API_KEY || 'your-api-key-here', // Get from environment
-		baseUrl: 'https://api.anthropic.com' // Default Anthropic API URL
+		apiKey: process.env.ANTHROPIC_API_KEY || 'your-api-key-here',
+		baseUrl: process.env.ANTHROPIC_BASE_URL || 'https://api.anthropic.com'
 	});
 
 	try {
@@ -36,7 +38,7 @@ async function functionalExample() {
 		// Demonstrate streaming
 		console.log('\n=== Streaming Example ===');
 		const streamingResponse = await anthropic.generateText({
-			model: 'claude-3-5-haiku-20241022',
+			model: 'claude-3-5-haiku-20241022', // Use fast model for streaming demo
 			prompt: 'Write a haiku about functional programming.',
 			maxTokens: 100,
 			stream: true
@@ -123,17 +125,17 @@ async function compositionExample() {
 		// Batch generation example
 		const batchResponses = await enhanced.batchGenerate([
 			{
-				model: 'claude-3-5-haiku-20241022',
+				model: 'claude-3-5-haiku-20241022', // Use fast model for batch
 				prompt: 'Define immutability',
 				maxTokens: 50
 			},
 			{
-				model: 'claude-3-5-haiku-20241022',
+				model: 'claude-3-5-haiku-20241022', // Use fast model for batch
 				prompt: 'Define pure functions',
 				maxTokens: 50
 			},
 			{
-				model: 'claude-3-5-haiku-20241022',
+				model: 'claude-3-5-haiku-20241022', // Use fast model for batch
 				prompt: 'Define higher-order functions',
 				maxTokens: 50
 			}

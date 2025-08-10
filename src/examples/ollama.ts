@@ -1,11 +1,14 @@
 import { createOllamaProvider } from '../sdk/index.js';
+import dotenv from 'dotenv';
+
+dotenv.config();
 
 async function functionalExample() {
 	console.log('=== Functional Programming Style ===');
 	
 	// Create an Ollama provider using functional approach
 	const ollama = createOllamaProvider({
-		baseUrl: 'http://localhost:11434' // Default Ollama server URL
+		baseUrl: process.env.OLLAMA_BASE_URL || 'http://localhost:11434'
 	});
 
 	try {
