@@ -12,6 +12,14 @@ export interface AnthropicProvider {
 	isServiceAvailable(): Promise<boolean>;
 }
 
+const knownModels = [
+			'claude-3-5-sonnet-20241022',
+			'claude-3-5-haiku-20241022',
+			'claude-3-opus-20240229',
+			'claude-3-sonnet-20240229',
+			'claude-3-haiku-20240307'
+		]
+
 // Pure function to create request body for Anthropic API
 const createRequestBody = (options: TextGenerationOptions) => {
 	const { model, prompt, maxTokens = 4096, stream = false, systemPrompt } = options;
@@ -144,15 +152,29 @@ const makeRequest = (baseUrl: string, apiKey: string, version: string) =>
 		return response;
 	};
 
-// Pure function to extract model names (Anthropic models are known)
-// TODO: Use models endpoint to fetch available models
-const getAvailableModels = (): string[] => [
-	'claude-3-5-sonnet-20241022',
-	'claude-3-5-haiku-20241022',
-	'claude-3-opus-20240229',
-	'claude-3-sonnet-20240229',
-	'claude-3-haiku-20240307'
-];
+// Pure function to extract model names from API response
+const extractModelNames = (modelsData: any): string[] => {
+	if (!modelsData?.data || !Array.isArray(modelsData.data)) {
+		// Fallback to known models if API response is invalid
+		return knownModels;
+	}
+	
+	return modelsData.data.map((model: any) => model.id).filter(Boolean);
+};
+
+// Function to fetch available models from Anthropic API
+// Anthropic API documentation: https://docs.anthropic.com/en/api/models-list.md
+const fetchAvailableModels = (request: (endpoint: string, options?: RequestInit) => Promise<Response>) => 
+	async (): Promise<string[]> => {
+		try {
+			const response = await request('/v1/models');
+			const modelsData = await response.json();
+			return extractModelNames(modelsData);
+		} catch (error) {
+			// Fallback to known models if API call fails
+			return knownModels;;
+		}
+	};
 
 // Error handling wrapper (higher-order function)
 const withErrorHandling = <T extends any[], R>(
@@ -175,6 +197,7 @@ export const createAnthropicProvider = (config: AnthropicConfig): AnthropicProvi
 	}
 
 	const request = makeRequest(baseUrl, apiKey, version);
+	const getModels = fetchAvailableModels(request);
 
 	const generateText = withErrorHandling(
 		async (options: TextGenerationOptions): Promise<TextGenerationResponse> => {
@@ -192,7 +215,7 @@ export const createAnthropicProvider = (config: AnthropicConfig): AnthropicProvi
 
 	const listModels = withErrorHandling(
 		async (): Promise<string[]> => {
-			return getAvailableModels();
+			return await getModels();
 		},
 		'Failed to list Anthropic models'
 	);
