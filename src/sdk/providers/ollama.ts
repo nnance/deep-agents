@@ -1,4 +1,12 @@
 import type { LLMProvider, TextGenerationOptions, TextGenerationResponse } from '../interfaces/providers.js';
+import { 
+	GenerationResponseSchema, 
+	StreamChunkSchema, 
+	ModelsResponseSchema,
+	type GenerationResponse,
+	type StreamChunk,
+	type ModelsResponse
+} from './ollama-schemas.js';
 
 export interface OllamaConfig {
 	baseUrl?: string;
@@ -30,30 +38,42 @@ const createRequestBody = (options: TextGenerationOptions) => {
 
 // Pure function to handle non-streaming response
 const parseResponse = async (response: Response): Promise<TextGenerationResponse> => {
-	const data = await response.json();
+	const rawData = await response.json();
+	
+	// Validate the response using Zod schema
+	const validationResult = GenerationResponseSchema.safeParse(rawData);
+	if (!validationResult.success) {
+		throw new Error(`Invalid Ollama API response format: ${validationResult.error.message}`);
+	}
+	
+	const data: GenerationResponse = validationResult.data;
+	const promptTokens = data.prompt_eval_count ?? 0;
+	const completionTokens = data.eval_count ?? 0;
 	
 	return {
 		text: data.response || '',
 		usage: {
-			promptTokens: data.prompt_eval_count,
-			completionTokens: data.eval_count,
-			totalTokens: (data.prompt_eval_count || 0) + (data.eval_count || 0)
+			promptTokens,
+			completionTokens,
+			totalTokens: promptTokens + completionTokens
 		}
 	};
 };
 
-// Higher-order function for parsing JSON lines
-const parseJsonLines = (lines: string[]) => 
+// Higher-order function for parsing JSON lines with validation
+const parseJsonLines = (lines: string[]): StreamChunk[] => 
 	lines.map(line => {
 		try {
-			return JSON.parse(line);
+			const parsed = JSON.parse(line);
+			const validationResult = StreamChunkSchema.safeParse(parsed);
+			return validationResult.success ? validationResult.data : null;
 		} catch {
 			return null;
 		}
-	}).filter(Boolean);
+	}).filter((chunk): chunk is StreamChunk => chunk !== null);
 
 // Pure function to accumulate streaming response data
-const accumulateStreamData = (chunks: any[]) => 
+const accumulateStreamData = (chunks: StreamChunk[]) => 
 	chunks.reduce(
 		(acc, data) => ({
 			text: acc.text + (data.response || ''),
@@ -71,7 +91,7 @@ const parseStreamResponse = async (response: Response): Promise<TextGenerationRe
 
 	const reader = response.body.getReader();
 	const decoder = new TextDecoder();
-	const chunks: any[] = [];
+	const chunks: StreamChunk[] = [];
 
 	try {
 		let done = false;
@@ -113,9 +133,18 @@ const makeRequest = (baseUrl: string) => async (endpoint: string, options?: Requ
 	return response;
 };
 
-// Pure function to extract model names
-const extractModelNames = (data: any): string[] => 
-	data.models?.map((model: any) => model.name) || [];
+// Pure function to extract model names from API response with validation
+const extractModelNames = (rawData: unknown): string[] => {
+	const validationResult = ModelsResponseSchema.safeParse(rawData);
+	
+	if (!validationResult.success || !validationResult.data.models) {
+		// Return empty array if validation fails or no models found
+		return [];
+	}
+	
+	const data: ModelsResponse = validationResult.data;
+	return data.models?.map(model => model.name) || [];
+};
 
 // Error handling wrapper (higher-order function)
 const withErrorHandling = <T extends any[], R>(

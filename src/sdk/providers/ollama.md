@@ -117,6 +117,18 @@ The provider includes comprehensive error handling for:
 - Network timeouts
 - Malformed responses
 
+## API Response Validation
+
+The Ollama provider includes built-in response validation using [Zod](https://zod.dev/) to ensure type safety and proper error handling. This validation is transparent to users but provides additional reliability.
+
+For detailed information about the validation implementation, see [Ollama Zod Integration](./ollama-zod-integration.md).
+
+Key benefits:
+- **Runtime type safety**: Catches API format changes automatically
+- **Better error messages**: Clear validation errors for malformed responses  
+- **Graceful degradation**: Returns empty arrays if validation fails for model lists
+- **Zero breaking changes**: Existing code continues to work without modification
+
 ## API Reference
 
 See the `LLMProvider` interface in `interfaces/providers.ts` for the complete API specification.
