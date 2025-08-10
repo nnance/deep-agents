@@ -6,19 +6,18 @@ export interface AnthropicConfig {
 	version?: string;
 }
 
-export interface AnthropicProvider {
-	generateText(options: TextGenerationOptions): Promise<TextGenerationResponse>;
+export interface AnthropicProvider extends LLMProvider {
 	listModels(): Promise<string[]>;
 	isServiceAvailable(): Promise<boolean>;
 }
 
 const knownModels = [
-			'claude-3-5-sonnet-20241022',
-			'claude-3-5-haiku-20241022',
-			'claude-3-opus-20240229',
-			'claude-3-sonnet-20240229',
-			'claude-3-haiku-20240307'
-		]
+	'claude-3-5-sonnet-20241022',
+	'claude-3-5-haiku-20241022',
+	'claude-3-opus-20240229',
+	'claude-3-sonnet-20240229',
+	'claude-3-haiku-20240307'
+]
 
 // Pure function to create request body for Anthropic API
 const createRequestBody = (options: TextGenerationOptions) => {
@@ -152,6 +151,18 @@ const makeRequest = (baseUrl: string, apiKey: string, version: string) =>
 		return response;
 	};
 
+// Function to send messages to the Anthropic API
+// Anthropic API documentation: https://docs.anthropic.com/en/api/messages.md
+const sendMessages = async (request: (endpoint: string, options?: RequestInit) => Promise<Response>, requestBody: Record<string, any>, options: TextGenerationOptions): Promise<TextGenerationResponse> => {
+			const response = await request('/v1/messages', {
+				method: 'POST',
+				body: JSON.stringify(requestBody),
+			});
+
+			return options.stream ? parseStreamResponse(response) : parseResponse(response);
+	};
+
+
 // Pure function to extract model names from API response
 const extractModelNames = (modelsData: any): string[] => {
 	if (!modelsData?.data || !Array.isArray(modelsData.data)) {
@@ -202,13 +213,7 @@ export const createAnthropicProvider = (config: AnthropicConfig): AnthropicProvi
 	const generateText = withErrorHandling(
 		async (options: TextGenerationOptions): Promise<TextGenerationResponse> => {
 			const requestBody = createRequestBody(options);
-			
-			const response = await request('/v1/messages', {
-				method: 'POST',
-				body: JSON.stringify(requestBody),
-			});
-
-			return options.stream ? parseStreamResponse(response) : parseResponse(response);
+			return sendMessages(request, requestBody, options);
 		},
 		'Failed to generate text with Anthropic'
 	);
