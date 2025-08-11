@@ -1,4 +1,3 @@
-import type { TextGenerationResponse } from "../index.js";
 import type { ChatCompletionOptions, Message } from "./messages.js";
 
 // Tool interface for defining available tools to the LLM
