@@ -1,4 +1,5 @@
-import type { ChatCompletionOptions, LLMProviderWithMessages, Message } from "./messages.js";
+import type { TextGenerationResponse } from "../index.js";
+import type { ChatCompletionOptions, Message } from "./messages.js";
 
 // Tool interface for defining available tools to the LLM
 export interface Tool {
@@ -43,19 +44,13 @@ export interface ChatWithToolsOptions
 
 // Chat response interface for chat messages with tool usage
 export interface ChatWithToolsResponse {
-	text: string; // The generated text from the model
-	usage?: {
-		promptTokens?: number; // The number of tokens in the prompt
-		completionTokens?: number; // The number of tokens in the completion
-		totalTokens?: number; // The total number of tokens used
-	};
 	toolCalls?: ToolCall[]; // Tool calls requested by the model
 	toolCallCount?: number; // Number of tool calls made
 	maxToolCallsReached?: boolean; // Indicates if limit was reached
 }
 
 // LLM provider interface for chat with tools
-export interface LLMProviderWithTools extends LLMProviderWithMessages {
+export interface LLMProviderWithTools {
 	generateChatWithTools(
 		options: ChatWithToolsOptions,
 	): Promise<ChatWithToolsResponse>;
@@ -63,7 +58,7 @@ export interface LLMProviderWithTools extends LLMProviderWithMessages {
 
 // Tool loop options interface for managing tool calls.  It should be implemented
 // by the application to handle tool calls in a loop.
-export interface ToolLoopOptions extends ChatWithToolsOptions {
+export interface ToolLoopOptions {
 	onToolCall?: (toolCall: ToolCall) => Promise<ToolResponse>;
 }
 

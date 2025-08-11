@@ -1,5 +1,5 @@
-import type { TextGenerationOptions, TextGenerationResponse } from '../interfaces/providers.js';
-import type { ChatCompletionOptions } from '../interfaces/messages.js';
+import type { LLMProvider, TextGenerationOptions, TextGenerationResponse } from '../interfaces/providers.js';
+import type { ChatCompletionOptions, LLMProviderWithMessages } from '../interfaces/messages.js';
 import type { 
 	LLMProviderWithTools, 
 	ChatWithToolsOptions, 
@@ -21,7 +21,7 @@ export interface AnthropicConfig {
 	version?: string;
 }
 
-export interface AnthropicProvider extends LLMProviderWithTools {
+export interface AnthropicProvider {
 	listModels(): Promise<string[]>;
 	isServiceAvailable(): Promise<boolean>;
 }
@@ -56,7 +56,7 @@ const createRequestBody = (options: TextGenerationOptions) => {
 };
 
 // Pure function to create request body for chat completion
-const createChatRequestBody = (options: ChatCompletionOptions) => {
+const createChatRequestBody = (options: TextGenerationOptions & ChatCompletionOptions) => {
 	const { model, maxTokens = 4096, stream = false, systemPrompt, messages, prompt } = options;
 	
 	// If messages are provided, use them; otherwise convert prompt to a message
@@ -82,7 +82,7 @@ const createChatRequestBody = (options: ChatCompletionOptions) => {
 };
 
 // Pure function to create request body for chat with tools
-const createChatWithToolsRequestBody = (options: ChatWithToolsOptions) => {
+const createChatWithToolsRequestBody = (options: TextGenerationOptions & ChatWithToolsOptions) => {
 	const { model, maxTokens = 4096, stream = false, systemPrompt, messages = [], tools = [] } = options;
 	
 	// Convert our MessageWithTool format to Anthropic's format
@@ -215,7 +215,7 @@ const parseToolsResponse = async (response: Response): Promise<ChatWithToolsResp
 		}
 	}
 	
-	const result: ChatWithToolsResponse = {
+	const result: TextGenerationResponse & ChatWithToolsResponse = {
 		text,
 		usage: {
 			promptTokens,
@@ -395,7 +395,7 @@ const withErrorHandling = <T extends any[], R>(
 };
 
 // Main factory function to create Anthropic provider
-export const createAnthropicProvider = (config: AnthropicConfig): AnthropicProvider => {
+export const createAnthropicProvider = (config: AnthropicConfig): LLMProvider & LLMProviderWithMessages & LLMProviderWithTools & AnthropicProvider => {
 	const { apiKey, baseUrl = 'https://api.anthropic.com', version = '2023-06-01' } = config;
 	
 	if (!apiKey) {
@@ -414,7 +414,7 @@ export const createAnthropicProvider = (config: AnthropicConfig): AnthropicProvi
 	);
 
 	const generateChatCompletion = withErrorHandling(
-		async (options: ChatCompletionOptions): Promise<TextGenerationResponse> => {
+		async (options: TextGenerationOptions & ChatCompletionOptions): Promise<TextGenerationResponse> => {
 			const requestBody = createChatRequestBody(options);
 			return sendMessages(request, requestBody, options);
 		},
@@ -429,7 +429,7 @@ export const createAnthropicProvider = (config: AnthropicConfig): AnthropicProvi
 	);
 
 	const generateChatWithTools = withErrorHandling(
-		async (options: ChatWithToolsOptions): Promise<ChatWithToolsResponse> => {
+		async (options: TextGenerationOptions & ChatWithToolsOptions): Promise<ChatWithToolsResponse> => {
 			const requestBody = createChatWithToolsRequestBody(options);
 			return sendToolsMessages(request, requestBody, options);
 		},
