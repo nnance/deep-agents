@@ -7,10 +7,18 @@ export const UsageSchema = z.object({
 });
 
 // Schema for content block in non-streaming responses
-export const ContentBlockSchema = z.object({
-  text: z.string(),
-  type: z.string().optional(),
-});
+export const ContentBlockSchema = z.union([
+  z.object({
+    type: z.literal('text'),
+    text: z.string(),
+  }),
+  z.object({
+    type: z.literal('tool_use'),
+    id: z.string(),
+    name: z.string(),
+    input: z.record(z.string(), z.any()),
+  }),
+]);
 
 // Schema for non-streaming message response
 export const MessageResponseSchema = z.object({

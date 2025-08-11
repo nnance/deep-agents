@@ -1,5 +1,11 @@
-import type { LLMProvider, TextGenerationOptions, TextGenerationResponse } from '../interfaces/providers.js';
-import type { LLMProviderWithMessages, ChatCompletionOptions, Message } from '../interfaces/messages.js';
+import type { TextGenerationOptions, TextGenerationResponse } from '../interfaces/providers.js';
+import type { ChatCompletionOptions } from '../interfaces/messages.js';
+import type { 
+	LLMProviderWithTools, 
+	ChatWithToolsOptions, 
+	ChatWithToolsResponse, 
+	ToolCall,
+} from '../interfaces/tools.js';
 import { 
 	MessageResponseSchema, 
 	StreamChunkSchema, 
@@ -15,7 +21,7 @@ export interface AnthropicConfig {
 	version?: string;
 }
 
-export interface AnthropicProvider extends LLMProviderWithMessages {
+export interface AnthropicProvider extends LLMProviderWithTools {
 	listModels(): Promise<string[]>;
 	isServiceAvailable(): Promise<boolean>;
 }
@@ -75,6 +81,84 @@ const createChatRequestBody = (options: ChatCompletionOptions) => {
 		: requestBody;
 };
 
+// Pure function to create request body for chat with tools
+const createChatWithToolsRequestBody = (options: ChatWithToolsOptions) => {
+	const { model, maxTokens = 4096, stream = false, systemPrompt, messages = [], tools = [] } = options;
+	
+	// Convert our MessageWithTool format to Anthropic's format
+	const anthropicMessages = messages.map(msg => {
+		if (msg.role === 'tool') {
+			// Tool result message
+			return {
+				role: 'user',
+				content: [
+					{
+						type: 'tool_result',
+						tool_use_id: msg.toolCallId,
+						content: msg.content
+					}
+				]
+			};
+		} else if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+			// Assistant message with tool calls
+			const content = [];
+			
+			// Add text content if present
+			if (msg.content) {
+				content.push({
+					type: 'text',
+					text: msg.content
+				});
+			}
+			
+			// Add tool use blocks
+			msg.toolCalls.forEach(toolCall => {
+				content.push({
+					type: 'tool_use',
+					id: toolCall.id,
+					name: toolCall.name,
+					input: toolCall.arguments
+				});
+			});
+			
+			return {
+				role: 'assistant',
+				content
+			};
+		} else {
+			// Regular message
+			return {
+				role: msg.role === 'assistant' ? 'assistant' : 'user',
+				content: msg.content
+			};
+		}
+	});
+
+	// Convert tools to Anthropic format
+	const anthropicTools = tools.map(tool => ({
+		name: tool.name,
+		description: tool.description,
+		input_schema: tool.parameters
+	}));
+
+	const requestBody: Record<string, any> = {
+		model,
+		max_tokens: maxTokens,
+		messages: anthropicMessages,
+		stream
+	};
+
+	// Add tools if provided
+	if (anthropicTools.length > 0) {
+		requestBody.tools = anthropicTools;
+	}
+
+	// Compose the request body using functional approach
+	return systemPrompt 
+		? { ...requestBody, system: systemPrompt }
+		: requestBody;
+};
+
 // Pure function to handle non-streaming response
 const parseResponse = async (response: Response): Promise<TextGenerationResponse> => {
 	const rawData = await response.json();
@@ -90,13 +174,63 @@ const parseResponse = async (response: Response): Promise<TextGenerationResponse
 	const completionTokens = data.usage?.output_tokens ?? 0;
 	
 	return {
-		text: data.content?.[0]?.text || '',
+		text: data.content?.[0]?.type === 'text' ? data.content[0].text : '',
 		usage: {
 			promptTokens,
 			completionTokens,
 			totalTokens: promptTokens + completionTokens
 		}
 	};
+};
+
+// Pure function to handle tools response
+const parseToolsResponse = async (response: Response): Promise<ChatWithToolsResponse> => {
+	const rawData = await response.json();
+	
+	// Validate the response using Zod schema
+	const validationResult = MessageResponseSchema.safeParse(rawData);
+	if (!validationResult.success) {
+		throw new Error(`Invalid Anthropic API response format: ${validationResult.error.message}`);
+	}
+	
+	const data: MessageResponse = validationResult.data;
+	const promptTokens = data.usage?.input_tokens ?? 0;
+	const completionTokens = data.usage?.output_tokens ?? 0;
+	
+	// Extract text content and tool calls
+	let text = '';
+	const toolCalls: ToolCall[] = [];
+	
+	if (data.content) {
+		for (const contentBlock of data.content) {
+			if (contentBlock.type === 'text') {
+				text += contentBlock.text;
+			} else if (contentBlock.type === 'tool_use') {
+				toolCalls.push({
+					id: contentBlock.id,
+					name: contentBlock.name,
+					arguments: contentBlock.input
+				});
+			}
+		}
+	}
+	
+	const result: ChatWithToolsResponse = {
+		text,
+		usage: {
+			promptTokens,
+			completionTokens,
+			totalTokens: promptTokens + completionTokens
+		},
+		toolCallCount: toolCalls.length,
+		maxToolCallsReached: false
+	};
+	
+	if (toolCalls.length > 0) {
+		result.toolCalls = toolCalls;
+	}
+	
+	return result;
 };
 
 // Higher-order function for parsing JSON lines with validation
@@ -209,6 +343,17 @@ const sendMessages = async (request: (endpoint: string, options?: RequestInit) =
 			return options.stream ? parseStreamResponse(response) : parseResponse(response);
 	};
 
+// Function to send messages with tools to the Anthropic API
+const sendToolsMessages = async (request: (endpoint: string, options?: RequestInit) => Promise<Response>, requestBody: Record<string, any>, options: { stream?: boolean }): Promise<ChatWithToolsResponse> => {
+			const response = await request('/v1/messages', {
+				method: 'POST',
+				body: JSON.stringify(requestBody),
+			});
+
+			// For tools, we only support non-streaming for now
+			return parseToolsResponse(response);
+	};
+
 
 // Pure function to extract model names from API response with validation
 const extractModelNames = (rawModelsData: unknown): string[] => {
@@ -283,6 +428,14 @@ export const createAnthropicProvider = (config: AnthropicConfig): AnthropicProvi
 		'Failed to list Anthropic models'
 	);
 
+	const generateChatWithTools = withErrorHandling(
+		async (options: ChatWithToolsOptions): Promise<ChatWithToolsResponse> => {
+			const requestBody = createChatWithToolsRequestBody(options);
+			return sendToolsMessages(request, requestBody, options);
+		},
+		'Failed to generate chat with tools with Anthropic'
+	);
+
 	const isServiceAvailable = async (): Promise<boolean> => {
 		try {
 			// Test with a minimal request to check if service is available
@@ -303,6 +456,7 @@ export const createAnthropicProvider = (config: AnthropicConfig): AnthropicProvi
 	return {
 		generateText,
 		generateChatCompletion,
+		generateChatWithTools,
 		listModels,
 		isServiceAvailable
 	};

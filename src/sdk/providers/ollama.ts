@@ -1,5 +1,11 @@
-import type { LLMProvider, TextGenerationOptions, TextGenerationResponse } from '../interfaces/providers.js';
-import type { LLMProviderWithMessages, ChatCompletionOptions, Message } from '../interfaces/messages.js';
+import type { TextGenerationOptions, TextGenerationResponse } from '../interfaces/providers.js';
+import type { ChatCompletionOptions, Message } from '../interfaces/messages.js';
+import type { 
+	LLMProviderWithTools, 
+	ChatWithToolsOptions, 
+	ChatWithToolsResponse, 
+	ToolCall
+} from '../interfaces/tools.js';
 import { 
 	GenerationResponseSchema, 
 	StreamChunkSchema, 
@@ -17,7 +23,7 @@ export interface OllamaConfig {
 	baseUrl?: string;
 }
 
-export interface OllamaProvider extends LLMProviderWithMessages {
+export interface OllamaProvider extends LLMProviderWithTools {
 	listModels(): Promise<string[]>;
 	isServerRunning(): Promise<boolean>;
 }
@@ -57,6 +63,72 @@ const createChatRequestBody = (options: ChatCompletionOptions) => {
 		messages: ollamaMessages,
 		stream
 	};
+
+	// Compose the request body using functional approach
+	return maxTokens ? 
+		{ ...requestBody, options: { num_predict: maxTokens } } : 
+		requestBody;
+};
+
+// Pure function to create request body for chat with tools
+const createChatWithToolsRequestBody = (options: ChatWithToolsOptions) => {
+	const { model, maxTokens, stream = false, systemPrompt, messages = [], tools = [] } = options;
+	
+	// Convert our MessageWithTool format to Ollama's format
+	const ollamaMessages = messages.map((msg, idx) => {
+		if (msg.role === 'tool' && msg.toolCallId) {
+			// Tool result message - in Ollama this becomes a user message with the result
+			return {
+				role: 'tool',
+				content: msg.content,
+				tool_name: msg.toolName
+			};
+		} else if (msg.role === 'assistant' && msg.toolCalls && msg.toolCalls.length > 0) {
+			// Assistant message with tool calls
+			return {
+				role: 'assistant',
+				content: msg.content || '',
+				tool_calls: msg.toolCalls.map(toolCall => ({
+					function: {
+						name: toolCall.name,
+						arguments: toolCall.arguments
+					}
+				}))
+			};
+		} else {
+			// Regular message
+			return {
+				role: msg.role,
+				content: msg.content
+			};
+		}
+	});
+
+	// Add system prompt if provided
+	const finalMessages = systemPrompt ? 
+		[{ role: 'system', content: systemPrompt }, ...ollamaMessages] : 
+		ollamaMessages;
+
+	// Convert tools to Ollama format
+	const ollamaTools = tools.map(tool => ({
+		type: 'function',
+		function: {
+			name: tool.name,
+			description: tool.description,
+			parameters: tool.parameters
+		}
+	}));
+
+	const requestBody: Record<string, any> = {
+		model,
+		messages: finalMessages,
+		stream
+	};
+
+	// Add tools if provided
+	if (ollamaTools.length > 0) {
+		requestBody.tools = ollamaTools;
+	}
 
 	// Compose the request body using functional approach
 	return maxTokens ? 
@@ -172,6 +244,62 @@ const parseChatResponse = async (response: Response): Promise<TextGenerationResp
 			totalTokens: promptTokens + completionTokens
 		}
 	};
+};
+
+// Pure function to handle tools response
+const parseToolsResponse = async (response: Response): Promise<ChatWithToolsResponse> => {
+	const rawData = await response.json();
+	console.log('Raw tools response:', JSON.stringify(rawData, null, 2));
+
+	// Validate the response using Zod schema
+	const validationResult = ChatResponseSchema.safeParse(rawData);
+	if (!validationResult.success) {
+		throw new Error(`Invalid Ollama chat API response format: ${validationResult.error.message}`);
+	}
+	
+	const data: ChatResponse = validationResult.data;
+	const promptTokens = data.prompt_eval_count ?? 0;
+	const completionTokens = data.eval_count ?? 0;
+	
+	// Extract text content and tool calls
+	const text = data.message?.content || '';
+	const toolCalls: ToolCall[] = [];
+	
+	if (data.message?.tool_calls) {
+		for (const ollamaToolCall of data.message.tool_calls) {
+			try {
+				toolCalls.push({
+					id: `ollama_${Date.now()}_${Math.random()}`,
+					name: ollamaToolCall.function.name,
+					arguments: ollamaToolCall.function.arguments || {}
+				});
+			} catch (error) {
+				// If arguments parsing fails, use empty object
+				toolCalls.push({
+					id: `ollama_${Date.now()}_${Math.random()}`,
+					name: ollamaToolCall.function.name,
+					arguments: {}
+				});
+			}
+		}
+	}
+	
+	const result: ChatWithToolsResponse = {
+		text,
+		usage: {
+			promptTokens,
+			completionTokens,
+			totalTokens: promptTokens + completionTokens
+		},
+		toolCallCount: toolCalls.length,
+		maxToolCallsReached: false
+	};
+	
+	if (toolCalls.length > 0) {
+		result.toolCalls = toolCalls;
+	}
+	
+	return result;
 };
 
 // Higher-order function for parsing chat JSON lines with validation
@@ -307,6 +435,23 @@ export const createOllamaProvider = (config: OllamaConfig = {}): OllamaProvider 
 		'Failed to generate chat completion with Ollama'
 	);
 
+	const generateChatWithTools = withErrorHandling(
+		async (options: ChatWithToolsOptions): Promise<ChatWithToolsResponse> => {
+			const requestBody = createChatWithToolsRequestBody(options);
+			console.log('Request body for chat with tools:', JSON.stringify(requestBody, null, 2));
+			
+			const response = await request('/api/chat', {
+				method: 'POST',
+				headers: { 'Content-Type': 'application/json' },
+				body: JSON.stringify(requestBody),
+			});
+
+			// For tools, we only support non-streaming for now
+			return parseToolsResponse(response);
+		},
+		'Failed to generate chat with tools with Ollama'
+	);
+
 	const listModels = withErrorHandling(
 		async (): Promise<string[]> => {
 			const response = await request('/api/tags');
@@ -328,6 +473,7 @@ export const createOllamaProvider = (config: OllamaConfig = {}): OllamaProvider 
 	return {
 		generateText,
 		generateChatCompletion,
+		generateChatWithTools,
 		listModels,
 		isServerRunning
 	};

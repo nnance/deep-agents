@@ -29,3 +29,18 @@ export type {
 	AnthropicConfig,
 	AnthropicProvider 
 } from './providers/anthropic.js';
+
+// Tools interfaces
+export type {
+	Tool,
+	ToolCall,
+	MessageWithTool,
+	ChatWithToolsOptions,
+	ChatWithToolsResponse,
+	LLMProviderWithTools,
+	ToolLoopOptions,
+	ToolLoopResult
+} from './interfaces/tools.js';
+
+// Utilities
+export { executeToolLoop } from './utils/tool-loop.js';

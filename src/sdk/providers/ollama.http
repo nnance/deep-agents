@@ -1,0 +1,74 @@
+POST http://localhost:11434/api/chat HTTP/1.1
+content-type: application/json
+
+{
+  "model": "qwen3:30b",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Calculate 25 * 4 and tell me the current time"
+    },
+    {
+      "role": "assistant",
+      "content": "<think>\nOkay, let's see. The user wants me to calculate 25 multiplied by 4 and also get the current time.\n\nFirst, I need to check the available tools. There's a calculate function that takes an expression. So for 25*4, I can use that. The expression should be \"25 * 4\".\n\nThen, the get_time function doesn't require any parameters, so I just need to call that.\n\nWait, the user asked for both, so I need to make two separate tool calls. Let me make sure the parameters are correct. The calculate function needs the expression as a string. So \"25 * 4\" is the right format.\n\nAlso, the get_time function has no parameters, so I just call it without any arguments.\n\nI should structure the tool calls correctly. Each in its own tool_call tag. Let me confirm the JSON structure. The name should be \"calculate\" with arguments {\"expression\": \"25 * 4\"}, and then \"get_time\" with empty arguments.\n\nYes, that's right. So two tool calls here. Let me write them out properly.\n</think>\n\n",
+      "tool_calls": [
+        {
+          "function": {
+            "name": "calculate",
+            "arguments": {"expression":"25 * 4"}
+          }
+        },
+        {
+          "function": {
+            "name": "get_time",
+            "arguments": {}
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "content": "The result is: 100",
+      "tool_name": "calculate"
+    },
+    {
+      "role": "tool",
+      "content": "Current time: 2025-08-11T02:21:49.863Z",
+      "tool_name": "get_time"
+    }
+  ],
+  "stream": false,
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "calculate",
+        "description": "Perform mathematical calculations",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "expression": {
+              "type": "string",
+              "description": "Mathematical expression to evaluate"
+            }
+          },
+          "required": [
+            "expression"
+          ]
+        }
+      }
+    },
+    {
+      "type": "function",
+      "function": {
+        "name": "get_time",
+        "description": "Get the current time",
+        "parameters": {
+          "type": "object",
+          "properties": {},
+          "required": []
+        }
+      }
+    }
+  ]
+}
